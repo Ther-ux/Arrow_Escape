@@ -2,9 +2,9 @@
 
 Python / Pygame 点击式箭头解谜游戏。沿箭头朝向到棋盘边界的路径没有其他箭头时，可以释放它；有阻挡则保留箭头并消耗一次失误。清空棋盘后进入通关页，失误耗尽后可以重开。
 
-当前版本为 M2 可玩 MVP：开始页、棋盘页、通关/失败结果、非阻塞飞出/碰撞动画、失误计数、重开、三个原创练习布局和切关。六关正式设计、独立可解验证器、提示、星级和选关尚未实现。
+当前版本为 M2 可玩 MVP，增加柔性尾线：开始页、棋盘页、通关/失败结果、非阻塞飞出/碰撞动画、失误计数、重开、三个原创练习布局和切关。六关正式设计、独立可解验证器、提示、星级和选关尚未实现。
 
-![游戏界面](docs/screenshots/game.png)
+![游戏界面](docs/rope-evidence/game.png)
 
 ## 环境与运行
 
@@ -29,11 +29,12 @@ python -m venv .venv
 ## 操作
 
 - 点击“开始游戏”进入第一关，鼠标左键点击箭头。
-- 无阻挡：450 ms 加速飞出并淡出，剩余箭头减少。
+- 无阻挡：箭头头部加速飞出，柔性尾线逐段跟随，剩余箭头减少。离场约 450–1150 ms，按尾线长度调整，最后阶段淡出。
 - 有阻挡：320 ms 红色回弹反馈，失误机会减一。动画期间同一箭头忽略重复点击，反馈结束后可再次点击。
 - 每关三次失误机会；最后一次反馈结束后进入失败页。
 - “重新开始”或 `R` 恢复当前关原始布局、失误次数并清除动画。
 - 最后一箭动画完成后显示通关页；点击“下一关”切关，末关显示全部练习完成。
+- 一条尾线离场后再释放下一支，避免同一路径多条运动尾线叠在一起；离场期间仍可使用重开、返回和退出。
 - `Esc` 返回首页；关闭窗口退出。
 
 ## 结构与核心算法
@@ -46,8 +47,12 @@ core/board.py          棋盘占用数据
 core/game.py           状态、点击结果和动画时间
 data/levels.py         三个原创 MVP 布局
 ui/app.py              Pygame 绘制、按钮、鼠标命中和主循环
+ui/rope.py             Verlet 节点、长度约束与轨迹引导
+ui/rope_renderer.py    平滑曲线与抗锯齿箭头绘制
+ui/routes.py           统一分配有间距的尾线路径
 tests/                 路径、状态和界面事件测试
 tools/smoke_ui.py      窗口自动验证与截图
+tools/rope_demo.py     柔性跟随、转向和回弹独立示例
 docs/                  测试记录、截图和真实 AIGC 记录
 ```
 
@@ -55,15 +60,28 @@ docs/                  测试记录、截图和真实 AIGC 记录
 
 模型的成功点击立即移除占用，绘制层通过动画副本展示离场，因此移除 blocker 后后续路径立即开放。核心 `Game.update(dt)` 推进动画，不调用 Pygame，也不休眠；窗口主循环持续处理事件、更新和绘制。绘制和命中使用同一 `BoardLayout` 几何换算。
 
+柔性尾线由约 10 px 间距的连续节点组成，只固定最前端箭头节点。以 240 Hz 固定步长执行 Verlet 积分和 18 轮距离约束，近端先受牵引，远端依靠惯性和软轨迹约束渐进跟随。使用较强阻尼和距历史轨迹最多 4 px 的横向约束，保留轻微拉伸回弹，抑制大幅甩动。节点以 Catmull–Rom 曲线插值并 2 倍采样绘制后缩小，得到平滑连续尾线。
+
+初始尾线统一规划，预留所有头部和直线离场走廊，并为不同尾线安排独立细网格路径；空间不足时缩短尾线。现有三关静止曲线间距均超过 15 px。视觉尾线不参与单格路径阻挡规则。游戏中的箭头仍按固定方向离场；转向响应可用独立示例查看：
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.rope_demo
+```
+
+![柔性尾线转向示例](docs/rope-evidence/rope-demo.gif)
+
 ## 测试与开发证据
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m compileall -q core data ui tools tests main.py
 .\.venv\Scripts\python.exe -m tools.smoke_ui
+.\.venv\Scripts\python.exe -m tools.smoke_ui --output docs/rope-evidence
 ```
 
 pytest 的界面测试使用 SDL dummy 驱动；`tools.smoke_ui` 默认打开真实窗口，注入鼠标事件，完整清空三个布局，验证通关、失败、重开、切关和退出，将截图写到 `docs/screenshots/`。它是自动化验证，不能代替作业要求的本人实际试玩。详细结果与坐标顺序见 [M2 测试记录](docs/m2-verification.md)，AI 协作见 [AIGC 记录](docs/aigc-log.md)。
+
+柔性尾线的最新验证与已知范围见 [柔性动画验证](docs/rope-verification.md)，本轮 68 项测试通过。
 
 ![开始页](docs/screenshots/home.png)
 ![通关页](docs/screenshots/success-l1.png)
