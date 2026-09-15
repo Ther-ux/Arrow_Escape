@@ -5,6 +5,7 @@ This is automated UI verification, not a record of human play.
 """
 
 from pathlib import Path
+import argparse
 
 import pygame
 
@@ -14,7 +15,10 @@ from ui.app import App
 
 
 def main():
-    output = Path("docs/screenshots")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, default=Path("docs/screenshots"))
+    args = parser.parse_args()
+    output = args.output
     output.mkdir(parents=True, exist_ok=True)
     app = App()
     print(f"SDL video driver: {pygame.display.get_driver()}")
@@ -70,7 +74,7 @@ def main():
                 assert arrow is not None, "layout has a deadlock"
                 sequence.append((arrow.row, arrow.col))
                 click(app.layout.cell_rect(arrow.row, arrow.col).center)
-                advance(0.5)
+                advance(app.game.animations[(arrow.row, arrow.col)].duration + 0.02)
             assert app.game.screen == Screen.SUCCESS
             advance(0.2)
             save(f"success-l{level_index + 1}")

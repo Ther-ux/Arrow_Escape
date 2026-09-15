@@ -5,6 +5,9 @@ import pygame
 
 from core.arrow import Arrow, Direction
 from core.game import Game, Move, Screen
+from ui.rope import Rope, resample
+from ui.rope_renderer import draw_rope
+from ui.routes import plan_routes
 
 WIDTH, HEIGHT = 1000, 760
 BG = (13, 18, 36)
@@ -15,6 +18,13 @@ MUTED = (145, 162, 186)
 CYAN = (82, 213, 232)
 GREEN = (94, 224, 163)
 RED = (255, 121, 130)
+ROUTE_COLORS = (
+    (82, 213, 232),
+    (190, 128, 255),
+    (169, 230, 101),
+    (255, 118, 191),
+    (255, 205, 91),
+)
 
 
 class BoardLayout:
@@ -53,6 +63,49 @@ class App:
         self.mouse = (-1, -1)
         self.result_age = 0.0
         self.message = "观察方向，寻找畅通的出口。"
+        self.ropes: dict[tuple[int, int], Rope] = {}
+        self._rope_board = self.game.board
+        self._route_board = None
+        self._paths = {}
+
+    def sync_ropes(self) -> None:
+        # A board object changes on restart/next level, even at the same index.
+        if self._rope_board is not self.game.board or self.game.screen == Screen.HOME:
+            self.ropes.clear()
+            self._rope_board = self.game.board
+        for position in set(self.ropes) - self.game.animations.keys():
+            del self.ropes[position]
+        for position, animation in self.game.animations.items():
+            if position not in self.ropes:
+                rope = Rope(self.rope_points(animation.arrow))
+                self.ropes[position] = rope
+                if animation.kind == Move.FLYING:
+                    # Include tail length: the result must wait for the rope,
+                    # rather than discarding a long body when its head exits.
+                    animation.visual_duration = max(0.45, min(1.15, 0.45 + rope.length / 650))
+
+    def rope_points(self, arrow: Arrow) -> list[tuple[float, float]]:
+        if self._route_board is not self.game.board:
+            layout = self.layout
+            self._paths = plan_routes(self.game.level.arrows, layout.rows, layout.cols,
+                                      layout.cell, layout.rect.topleft)
+            self._route_board = self.game.board
+        return self._paths[(arrow.row, arrow.col)]
+
+    def head_at(self, animation, rope: Rope, elapsed: float) -> tuple[float, float]:
+        arrow = animation.arrow
+        rect, bounds = self.layout.cell_rect(arrow.row, arrow.col), self.layout.rect
+        dy, dx = arrow.direction.delta
+        p = min(1.0, elapsed / animation.duration)
+        if animation.kind == Move.FLYING:
+            edge_distance = ((bounds.right - rect.centerx) if dx > 0 else
+                             (rect.centerx - bounds.left) if dx < 0 else
+                             (bounds.bottom - rect.centery) if dy > 0 else
+                             (rect.centery - bounds.top))
+            offset = (edge_distance + rope.length + 90) * p * p
+        else:
+            offset = 14 * math.sin(p * math.pi) * math.cos(p * math.pi * 2)
+        return (rect.centerx + dx * (18 + offset), rect.centery + dy * (18 + offset))
 
     @property
     def layout(self) -> BoardLayout:
@@ -109,15 +162,25 @@ class App:
             elif self.game.screen == Screen.PLAYING:
                 position = self.layout.hit(event.pos)
                 if position is not None:
+                    if any(a.kind == Move.FLYING for a in self.game.animations.values()):
+                        self.message = "尾线正在离场，稍等一下再释放下一支。"
+                        return
                     move = self.game.click(*position)
                     if move == Move.COLLISION:
                         self.message = "前方有箭头阻挡，失误机会 −1。"
                     elif move == Move.FLYING:
                         self.message = "路径畅通，箭头已释放。"
+        self.sync_ropes()
 
     def update(self, dt: float) -> None:
+        self.sync_ropes()
+        for position, rope in self.ropes.items():
+            animation = self.game.animations[position]
+            rope.advance(min(dt, max(0.0, animation.duration - animation.elapsed)),
+                         lambda elapsed, a=animation, r=rope: self.head_at(a, r, elapsed))
         before = self.game.screen
         self.game.update(dt)
+        self.sync_ropes()
         if before != self.game.screen:
             self.result_age = 0.0
         if self.game.screen in (Screen.SUCCESS, Screen.FAILED):
@@ -139,41 +202,48 @@ class App:
         sprite.set_alpha(max(0, min(255, alpha)))
         self.surface.blit(sprite, sprite.get_rect(center=center))
 
+    def route(self, arrow: Arrow, color: tuple[int, int, int], alpha: int = 255,
+              highlighted: bool = False, nodes=None) -> None:
+        """Render a continuous curve, with the arrow tip at the pinned head."""
+        dy, dx = arrow.direction.delta
+        draw_rope(self.surface, nodes if nodes is not None else resample(self.rope_points(arrow)),
+                  (dx, dy), color, alpha, 5 if highlighted else 3)
+
+    def draw_map_backdrop(self, layout: BoardLayout) -> None:
+        """Give the board a map-like boundary without drawing a grid."""
+        map_rect = layout.rect.inflate(18, 18)
+        pygame.draw.rect(self.surface, (18, 28, 49), map_rect, border_radius=24)
+        pygame.draw.rect(self.surface, (37, 57, 79), map_rect, 1, border_radius=24)
+        for x in range(map_rect.left + 14, map_rect.right - 13, 14):
+            pygame.draw.circle(self.surface, (61, 83, 105), (x, map_rect.top - 5), 2)
+            pygame.draw.circle(self.surface, (61, 83, 105), (x, map_rect.bottom + 5), 2)
+        for y in range(map_rect.top + 14, map_rect.bottom - 13, 14):
+            pygame.draw.circle(self.surface, (61, 83, 105), (map_rect.left - 5, y), 2)
+            pygame.draw.circle(self.surface, (61, 83, 105), (map_rect.right + 5, y), 2)
+
     def draw_board(self) -> None:
+        self.sync_ropes()
         layout = self.layout
         hovered = layout.hit(self.mouse) if self.game.screen == Screen.PLAYING else None
-        for row in range(layout.rows):
-            for col in range(layout.cols):
-                rect = layout.cell_rect(row, col).inflate(-8, -8)
-                position = (row, col)
-                is_hover = position == hovered and position in self.game.board.arrows
-                pygame.draw.rect(self.surface, (29, 47, 67) if is_hover else PANEL, rect, border_radius=12)
-                pygame.draw.rect(self.surface, CYAN if is_hover else LINE, rect, 1, border_radius=12)
-                arrow = self.game.board.arrow_at(row, col)
-                if arrow and position not in self.game.animations:
-                    self.arrow(arrow, rect.center, 1.1 if is_hover else 1, CYAN)
-        # Flight is clipped to the board region, disappearing at its boundary.
+        self.draw_map_backdrop(layout)
+
+        # Draw the map routes first, then place the arrowheads on top. There
+        # are deliberately no cell tiles or grid lines in this layer.
+        for position, arrow in self.game.board.arrows.items():
+            if position not in self.game.animations:
+                self.route(arrow, ROUTE_COLORS[(position[0] * layout.cols + position[1]) % len(ROUTE_COLORS)],
+                           highlighted=position == hovered)
+
+        # Allow the head to cross the map border without covering HUD/buttons.
         previous_clip = self.surface.get_clip()
-        self.surface.set_clip(layout.rect.inflate(12, 12))
-        for animation in self.game.animations.values():
-            rect = layout.cell_rect(animation.arrow.row, animation.arrow.col)
-            dy, dx = animation.arrow.direction.delta
+        self.surface.set_clip(pygame.Rect(48, 215, 585, 450))
+        for position, animation in self.game.animations.items():
             p = animation.progress
             if animation.kind == Move.FLYING:
-                if dx > 0:
-                    distance = layout.rect.right - rect.centerx + 50
-                elif dx < 0:
-                    distance = rect.centerx - layout.rect.left + 50
-                elif dy > 0:
-                    distance = layout.rect.bottom - rect.centery + 50
-                else:
-                    distance = rect.centery - layout.rect.top + 50
-                offset = distance * p * p
-                color, alpha = GREEN, int(255 * (1 - p * p))
+                color, alpha = GREEN, int(255 * (1 - max(0, (p - 0.8) / 0.2)))
             else:
-                offset = 14 * math.sin(p * math.pi) * math.cos(p * math.pi * 2)
                 color, alpha = RED, 255
-            self.arrow(animation.arrow, (rect.centerx + dx * offset, rect.centery + dy * offset), 1, color, alpha)
+            self.route(animation.arrow, color, alpha, nodes=self.ropes[position].positions)
         self.surface.set_clip(previous_clip)
 
     def draw(self) -> None:

@@ -25,10 +25,11 @@ class Animation:
     arrow: Arrow
     kind: Move
     elapsed: float = 0.0
+    visual_duration: float | None = None
 
     @property
     def duration(self) -> float:
-        return 0.45 if self.kind == Move.FLYING else 0.32
+        return self.visual_duration or (0.45 if self.kind == Move.FLYING else 0.32)
 
     @property
     def progress(self) -> float:

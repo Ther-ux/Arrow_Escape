@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 build/
 dist/
+docs/rope-evidence/demo-frames/

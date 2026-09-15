@@ -67,3 +67,48 @@ def test_stale_buttons_cannot_restart_after_returning_home(app):
     app.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
     app.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=restart_center))
     assert app.game.screen == Screen.HOME
+
+
+def test_flight_nodes_follow_head_and_restart_clears_rope(app):
+    click(app, app.buttons["start"].center)
+    click(app, app.layout.cell_rect(2, 4).center)
+    rope = app.ropes[(2, 4)]
+    original_tail = rope.positions[-1]
+    app.update(0.1)
+    assert rope.positions[0] != original_tail
+    assert rope.positions[-1] != original_tail
+    assert app.game.animations[(2, 4)].duration > 0.45
+    app.draw()
+    # Rendering is pure: additional draw calls do not advance physics.
+    snapshot = list(rope.positions)
+    app.draw()
+    assert rope.positions == snapshot
+    click(app, app.buttons["restart"].center)
+    assert not app.ropes
+    assert not app.game.animations
+
+
+def test_last_rope_keeps_result_pending_until_tail_finishes(app):
+    click(app, app.buttons["start"].center)
+    app.game.board.arrows = {(4, 3): app.game.board.arrow_at(4, 3)}
+    click(app, app.layout.cell_rect(4, 3).center)
+    duration = app.game.animations[(4, 3)].duration
+    app.update(duration - 0.01)
+    assert app.game.screen == Screen.PLAYING
+    assert app.ropes
+    app.update(0.02)
+    assert app.game.screen == Screen.SUCCESS
+    assert not app.ropes
+
+
+def test_next_release_waits_for_rope_to_avoid_overlapping_departures(app):
+    click(app, app.buttons["start"].center)
+    click(app, app.layout.cell_rect(0, 1).center)
+    duration = app.game.animations[(0, 1)].duration
+    click(app, app.layout.cell_rect(1, 1).center)
+    assert app.game.board.arrow_at(1, 1) is not None
+    assert app.game.mistakes_left == 3
+    assert set(app.ropes) == {(0, 1)}
+    app.update(duration + 0.01)
+    click(app, app.layout.cell_rect(1, 1).center)
+    assert app.game.board.arrow_at(1, 1) is None
