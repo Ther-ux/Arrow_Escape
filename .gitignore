@@ -4,3 +4,4 @@ __pycache__/
 build/
 dist/
 docs/rope-evidence/demo-frames/
+data/endless_progress.json

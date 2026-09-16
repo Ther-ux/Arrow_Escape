@@ -27,7 +27,7 @@ def draw_rope(surface: pygame.Surface, nodes: list[Point], heading: Point,
     size = (bounds.width * scale, bounds.height * scale)
     local = [((x - bounds.x) * scale, (y - bounds.y) * scale) for x, y in points]
     glow = pygame.Surface(size, pygame.SRCALPHA)
-    pygame.draw.lines(glow, (*color, min(alpha, 45)), False, local, (width + 6) * scale)
+    pygame.draw.lines(glow, (*color, min(alpha, 28)), False, local, (width + 5) * scale)
     layer = pygame.Surface(size, pygame.SRCALPHA)
     pygame.draw.lines(layer, (*color, alpha), False, local, width * scale)
     pygame.draw.circle(layer, (*color, alpha), local[-1], width * scale // 2)
