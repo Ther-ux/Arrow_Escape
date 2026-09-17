@@ -45,6 +45,8 @@ python -m venv .venv
 
 打包完成后，可执行文件位于 `dist/ArrowEscape.exe`。
 
+也可以直接下载已打包版本：[ArrowEscape.exe](dist/ArrowEscape.exe)。
+
 ## 操作
 
 - 在主页选择“普通玩法”或“进阶玩法”，点击对应的开始按钮进入第一关；鼠标左键点击箭头。
