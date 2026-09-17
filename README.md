@@ -99,7 +99,15 @@ pytest 的界面测试使用 SDL dummy 驱动；`tools.smoke_ui` 默认打开真
 
 柔性尾线的最新验证与已知范围见 [柔性动画验证](docs/rope-verification.md)，当前回归测试共 94 项。
 
-![开始页](docs/screenshots/home.png)
+### 普通玩法
+
+![普通玩法主页](docs/screenshots/basic-home.png)
+![普通玩法棋盘](docs/screenshots/basic-game.png)
+
+### 进阶玩法与结果页
+
+![进阶玩法主页](docs/screenshots/home.png)
+![进阶玩法棋盘](docs/screenshots/game.png)
 ![通关页](docs/screenshots/success-l1.png)
 ![失败页](docs/screenshots/failed.png)
 
