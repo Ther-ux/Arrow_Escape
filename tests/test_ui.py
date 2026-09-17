@@ -93,6 +93,24 @@ def test_home_difficulty_and_endless_mode_selection(app):
     assert len(app.game.level.arrows) == 16
 
 
+def test_basic_playstyle_has_only_fixed_levels_and_no_advanced_selectors(app):
+    click(app, app.buttons["play_basic"].center)
+    assert set(app.buttons) == {"play_basic", "play_advanced", "start"}
+
+    click(app, app.buttons["start"].center)
+    assert not app.game.endless
+    assert len(app.game.levels) == 3
+    assert app.layout.cell < BoardLayout(app.game.board.rows, app.game.board.cols).cell
+
+    click(app, app.buttons["ai"].center)
+    for _ in range(200):
+        app.update(0.1)
+        app.draw()
+        if app.game.screen == Screen.SUCCESS:
+            break
+    assert app.game.screen == Screen.SUCCESS
+
+
 def test_endless_completion_saves_next_level_and_resumes(app):
     click(app, app.buttons["mode_endless"].center)
     click(app, app.buttons["start"].center)

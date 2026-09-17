@@ -17,6 +17,13 @@ class GameMode(str, Enum):
     ENDLESS = "endless"
 
 
+class PlayStyle(str, Enum):
+    """The two player-facing versions of the game."""
+
+    BASIC = "basic"
+    ADVANCED = "advanced"
+
+
 @dataclass(frozen=True)
 class Level:
     name: str
@@ -46,6 +53,11 @@ LEVELS = (
         Arrow(3, 5, R), Arrow(5, 1, D), Arrow(5, 4, L),
     )),
 )
+
+# The basic play style is the original fixed three-level version.  It shares
+# the same solvable layouts as the first release; the UI renders these levels
+# as small arrows inside cells instead of the route-map presentation.
+BASIC_LEVELS = LEVELS
 
 
 def generate_solvable_level(name: str, rows: int, cols: int, arrow_count: int,

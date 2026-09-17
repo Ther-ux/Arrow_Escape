@@ -8,7 +8,8 @@ import pygame
 from core.arrow import Arrow, Direction
 from core.game import Game, Move, Screen
 from core.progress import DEFAULT_PROGRESS_PATH, load_endless_level, save_endless_level
-from data.levels import Difficulty, GameMode, generate_endless_level, levels_for_difficulty
+from data.levels import (BASIC_LEVELS, Difficulty, GameMode, PlayStyle,
+                         generate_endless_level, levels_for_difficulty)
 from ui.rope import Rope, resample
 from ui.rope_renderer import draw_rope
 from ui.routes import plan_routes
@@ -34,9 +35,11 @@ ROUTE_COLORS = (
 class BoardLayout:
     """Drawing and mouse hit tests share the same grid geometry."""
 
-    def __init__(self, rows: int, cols: int):
+    def __init__(self, rows: int, cols: int, compact: bool = False):
         self.rows, self.cols = rows, cols
-        self.cell = min(76, 440 // max(rows, cols))
+        self.compact = compact
+        self.cell = (min(56, 320 // max(rows, cols)) if compact else
+                     min(76, 440 // max(rows, cols)))
         self.rect = pygame.Rect(0, 0, cols * self.cell, rows * self.cell)
         self.rect.center = (365, 430)
 
@@ -69,6 +72,10 @@ class App:
         self.result_age = 0.0
         self.message = "观察方向，寻找畅通的出口。"
         self.auto_solving = False
+        # Keep the advanced version selected by default so returning users
+        # land in the current game immediately; both versions are always one
+        # click away on the home page.
+        self.selected_play_style = PlayStyle.ADVANCED
         self.selected_mode = GameMode.NORMAL
         self.selected_difficulty = Difficulty.MEDIUM
         self.progress_path = progress_path or DEFAULT_PROGRESS_PATH
@@ -132,10 +139,13 @@ class App:
 
     @property
     def layout(self) -> BoardLayout:
-        return BoardLayout(self.game.board.rows, self.game.board.cols)
+        return BoardLayout(self.game.board.rows, self.game.board.cols,
+                           compact=self.selected_play_style == PlayStyle.BASIC)
 
     def start_selected_game(self) -> None:
-        if self.selected_mode == GameMode.ENDLESS:
+        if self.selected_play_style == PlayStyle.BASIC:
+            self.game.start(BASIC_LEVELS)
+        elif self.selected_mode == GameMode.ENDLESS:
             first_level = generate_endless_level(self.saved_endless_level)
             self.game.start((first_level,), endless=True,
                             level_factory=generate_endless_level,
@@ -179,12 +189,15 @@ class App:
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.mouse = event.pos
             allowed = {
-                Screen.HOME: {"start", "mode_normal", "mode_endless"},
+                Screen.HOME: {"start", "play_basic", "play_advanced",
+                              "mode_normal", "mode_endless"},
                 Screen.PLAYING: {"restart", "home", "hint", "undo", "ai"},
                 Screen.SUCCESS: {"next", "restart", "home"},
                 Screen.FAILED: {"restart", "home"},
             }[self.game.screen]
-            if self.game.screen == Screen.HOME and self.selected_mode == GameMode.NORMAL:
+            if (self.game.screen == Screen.HOME and
+                    self.selected_play_style == PlayStyle.ADVANCED and
+                    self.selected_mode == GameMode.NORMAL):
                 allowed |= {"difficulty_easy", "difficulty_medium", "difficulty_hard"}
             action = next((key for key, rect in self.buttons.items()
                            if key in allowed and rect.collidepoint(event.pos)), None)
@@ -192,6 +205,11 @@ class App:
                 self.start_selected_game()
                 self.auto_solving = False
                 self.message = "观察方向，寻找畅通的出口。"
+            elif action == "play_basic":
+                self.selected_play_style = PlayStyle.BASIC
+                self.selected_mode = GameMode.NORMAL
+            elif action == "play_advanced":
+                self.selected_play_style = PlayStyle.ADVANCED
             elif action == "mode_normal":
                 self.selected_mode = GameMode.NORMAL
             elif action == "mode_endless":
@@ -311,6 +329,9 @@ class App:
     def draw_board(self) -> None:
         self.sync_ropes()
         layout = self.layout
+        if self.selected_play_style == PlayStyle.BASIC:
+            self.draw_basic_board(layout)
+            return
         hovered = layout.hit(self.mouse) if self.game.screen == Screen.PLAYING else None
         self.draw_map_backdrop(layout)
 
@@ -335,6 +356,42 @@ class App:
             self.route(animation.arrow, color, alpha, nodes=self.ropes[position].positions)
         self.surface.set_clip(previous_clip)
 
+    def draw_basic_board(self, layout: BoardLayout) -> None:
+        """Render the original version: one small arrow per small grid cell."""
+        board_frame = layout.rect.inflate(22, 22)
+        pygame.draw.rect(self.surface, (18, 28, 49), board_frame, border_radius=18)
+        pygame.draw.rect(self.surface, (37, 57, 79), board_frame, 1, border_radius=18)
+        hovered = layout.hit(self.mouse) if self.game.screen == Screen.PLAYING else None
+
+        for row in range(layout.rows):
+            for col in range(layout.cols):
+                cell = layout.cell_rect(row, col).inflate(-4, -4)
+                fill = (28, 39, 63) if (row, col) == hovered else (22, 31, 52)
+                pygame.draw.rect(self.surface, fill, cell, border_radius=7)
+                pygame.draw.rect(self.surface, LINE, cell, 1, border_radius=7)
+
+        for position, arrow in self.game.board.arrows.items():
+            if position in self.game.animations:
+                continue
+            highlighted = position == hovered or position == self.game.hinted_position
+            color = CYAN if highlighted else ROUTE_COLORS[
+                (position[0] * layout.cols + position[1]) % len(ROUTE_COLORS)]
+            center = layout.cell_rect(*position).center
+            self.arrow(arrow, center, 0.78 if highlighted else 0.68, color)
+
+        previous_clip = self.surface.get_clip()
+        self.surface.set_clip(board_frame.inflate(30, 30))
+        for position, animation in self.game.animations.items():
+            rope = self.ropes[position]
+            center = self.head_at(animation, rope, animation.elapsed)
+            if animation.kind == Move.FLYING:
+                color = GREEN
+                alpha = int(255 * (1 - max(0, (animation.progress - 0.8) / 0.2)))
+            else:
+                color, alpha = RED, 255
+            self.arrow(animation.arrow, center, 0.72, color, alpha)
+        self.surface.set_clip(previous_clip)
+
     def draw(self) -> None:
         self.buttons.clear()
         self.surface.fill(BG)
@@ -344,42 +401,55 @@ class App:
         self.text("找到出口，一箭破局", (WIDTH - 275, 38), 16, MUTED)
         pygame.draw.line(self.surface, LINE, (48, 115), (952, 115))
         if self.game.screen == Screen.HOME:
-            self.text("只需一点，顺序由你决定。", (500, 185), 38, center=True)
-            self.text("观察箭头的前方，让每一支箭头找到出口。", (500, 241), 18, MUTED, True)
-            self.text("游戏模式", (500, 290), 16, MUTED, True)
-            self.button("mode_normal", "普通模式",
-                        pygame.Rect(295, 310, 180, 48),
-                        primary=self.selected_mode == GameMode.NORMAL)
-            self.button("mode_endless", "无尽模式",
-                        pygame.Rect(525, 310, 180, 48),
-                        primary=self.selected_mode == GameMode.ENDLESS)
-            self.text("难度设置", (500, 390), 16, MUTED, True)
-            if self.selected_mode == GameMode.NORMAL:
-                difficulty_buttons = (
-                    ("difficulty_easy", "简单", Difficulty.EASY),
-                    ("difficulty_medium", "中等", Difficulty.MEDIUM),
-                    ("difficulty_hard", "困难", Difficulty.HARD),
-                )
-                for index, (key, label, difficulty) in enumerate(difficulty_buttons):
-                    self.button(key, label, pygame.Rect(260 + index * 160, 410, 140, 48),
-                                primary=self.selected_difficulty == difficulty)
+            self.text("只需一点，顺序由你决定。", (500, 175), 38, center=True)
+            self.text("观察箭头的前方，让每一支箭头找到出口。", (500, 225), 18, MUTED, True)
+            self.text("选择玩法", (500, 270), 16, MUTED, True)
+            self.button("play_basic", "普通玩法",
+                        pygame.Rect(230, 292, 250, 54),
+                        primary=self.selected_play_style == PlayStyle.BASIC)
+            self.button("play_advanced", "进阶玩法",
+                        pygame.Rect(520, 292, 250, 54),
+                        primary=self.selected_play_style == PlayStyle.ADVANCED)
+
+            if self.selected_play_style == PlayStyle.BASIC:
+                self.text("最初设计版本", (500, 390), 22, TEXT, True)
+                self.text("小箭头放在小格子中，固定三个关卡。", (500, 425), 16, MUTED, True)
+                self.text("没有难度和模式选择，提示、撤销、AI 等功能均可使用。",
+                          (500, 452), 14, MUTED, True)
+                self.button("start", "开始普通玩法", pygame.Rect(370, 510, 260, 56), True)
+                mode_info = "普通玩法 · 固定 3 个关卡 · 每关 3 次失误机会"
             else:
-                self.button("difficulty_hard", "困难（无尽固定）",
-                            pygame.Rect(390, 410, 220, 48), primary=True)
-            self.button("start", "开始游戏", pygame.Rect(370, 510, 260, 56), True)
-            if self.selected_mode == GameMode.NORMAL:
-                difficulty_label = {
-                    Difficulty.EASY: "简单",
-                    Difficulty.MEDIUM: "中等",
-                    Difficulty.HARD: "困难",
-                }[self.selected_difficulty]
-                mode_info = f"普通模式 · {difficulty_label}难度 · 3 个关卡"
-            else:
-                mode_info = (f"无尽模式 · 困难难度 · 继续第 {self.saved_endless_level} 关"
-                             if self.saved_endless_level > 1 else
-                             "无尽模式 · 困难难度 · 关卡持续生成")
-            self.text(f"{mode_info}  ·  每关 {self.game.level.max_mistakes} 次失误机会",
-                      (500, 601), 16, MUTED, True)
+                self.text("进阶设置", (500, 378), 16, MUTED, True)
+                self.button("mode_normal", "标准模式",
+                            pygame.Rect(270, 398, 200, 46),
+                            primary=self.selected_mode == GameMode.NORMAL)
+                self.button("mode_endless", "无尽模式",
+                            pygame.Rect(530, 398, 200, 46),
+                            primary=self.selected_mode == GameMode.ENDLESS)
+                if self.selected_mode == GameMode.NORMAL:
+                    difficulty_buttons = (
+                        ("difficulty_easy", "简单", Difficulty.EASY),
+                        ("difficulty_medium", "中等", Difficulty.MEDIUM),
+                        ("difficulty_hard", "困难", Difficulty.HARD),
+                    )
+                    for index, (key, label, difficulty) in enumerate(difficulty_buttons):
+                        self.button(key, label, pygame.Rect(260 + index * 160, 466, 140, 42),
+                                    primary=self.selected_difficulty == difficulty)
+                    difficulty_label = {
+                        Difficulty.EASY: "简单",
+                        Difficulty.MEDIUM: "中等",
+                        Difficulty.HARD: "困难",
+                    }[self.selected_difficulty]
+                    mode_info = f"进阶玩法 · 标准模式 · {difficulty_label}难度 · 3 个关卡"
+                else:
+                    self.button("difficulty_hard", "困难（无尽固定）",
+                                pygame.Rect(390, 466, 220, 42), primary=True)
+                    mode_info = (f"进阶玩法 · 无尽模式 · 继续第 {self.saved_endless_level} 关"
+                                 if self.saved_endless_level > 1 else
+                                 "进阶玩法 · 无尽模式 · 关卡持续生成")
+                self.button("start", "开始进阶玩法", pygame.Rect(370, 535, 260, 56), True)
+
+            self.text(mode_info, (500, 630), 16, MUTED, True)
         else:
             total_levels = "∞" if self.game.endless else f"{len(self.game.levels):02d}"
             current_level = (self.game.endless_level_number if self.game.endless
