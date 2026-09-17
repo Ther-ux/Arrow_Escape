@@ -35,6 +35,16 @@ python -m venv .venv
 
 只运行游戏可安装 `requirements.txt`；`requirements-dev.txt` 额外包含 pytest。工作区系统 `python` 命令原先是不可用的 Windows 商店别名，已有 `.venv` 使用 Codex 随附解释器创建，无需激活环境。
 
+## 打包 Windows 可执行文件
+
+开发依赖包含 PyInstaller。在项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --windowed --name ArrowEscape main.py
+```
+
+打包完成后，可执行文件位于 `dist/ArrowEscape.exe`。
+
 ## 操作
 
 - 在主页选择“普通玩法”或“进阶玩法”，点击对应的开始按钮进入第一关；鼠标左键点击箭头。
